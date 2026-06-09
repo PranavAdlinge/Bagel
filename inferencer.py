@@ -20,13 +20,27 @@ The planning process is enclosed within <think> </think> tags, i.e. <think> plan
 
 
 class InterleaveInferencer:
-    def __init__(self, model, vae_model, tokenizer, vae_transform, vit_transform, new_token_ids):
+    def __init__(self, model, vae_model, tokenizer, vae_transform, vit_transform, new_token_ids, device=None):
         self.model = model
         self.vae_model = vae_model
         self.tokenizer = tokenizer
         self.vae_transform = vae_transform
         self.vit_transform = vit_transform
         self.new_token_ids = new_token_ids
+        self.device = device
+
+    def _to_device(self, value):
+        if self.device is None:
+            return value
+        if torch.is_tensor(value):
+            return value.to(self.device, non_blocking=True)
+        if isinstance(value, dict):
+            return {k: self._to_device(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._to_device(v) for v in value]
+        if isinstance(value, tuple):
+            return tuple(self._to_device(v) for v in value)
+        return value
         
     def init_gen_context(self): 
         gen_context = {
@@ -50,6 +64,7 @@ class InterleaveInferencer:
             tokenizer=self.tokenizer, 
             new_token_ids=self.new_token_ids,
         )
+        generation_input = self._to_device(generation_input)
 
         past_key_values = self.model.forward_cache_update_text(past_key_values, **generation_input)        
         gen_context['kv_lens'] = kv_lens
@@ -76,6 +91,7 @@ class InterleaveInferencer:
                 transforms=self.vae_transform, 
                 new_token_ids=self.new_token_ids,
             )
+            generation_input = self._to_device(generation_input)
             past_key_values = self.model.forward_cache_update_vae(self.vae_model, past_key_values, **generation_input)
         
         if vit:
@@ -87,6 +103,7 @@ class InterleaveInferencer:
                 transforms=self.vit_transform, 
                 new_token_ids=self.new_token_ids,
             )
+            generation_input = self._to_device(generation_input)
             past_key_values = self.model.forward_cache_update_vit(past_key_values, **generation_input)
 
         gen_context['kv_lens'] = kv_lens
@@ -123,6 +140,7 @@ class InterleaveInferencer:
             image_sizes=[image_shape], 
             new_token_ids=self.new_token_ids,
         ) 
+        generation_input = self._to_device(generation_input)
         
         # text cfg
         cfg_text_past_key_values = cfg_text_precontext['past_key_values']
@@ -133,6 +151,7 @@ class InterleaveInferencer:
             curr_rope=ropes_cfg, 
             image_sizes=[image_shape], 
         )
+        generation_input_cfg_text = self._to_device(generation_input_cfg_text)
 
         # img cfg
         cfg_img_past_key_values = cfg_img_precontext['past_key_values']
@@ -143,6 +162,7 @@ class InterleaveInferencer:
             curr_rope=ropes_cfg, 
             image_sizes=[image_shape], 
         )
+        generation_input_cfg_img = self._to_device(generation_input_cfg_img)
 
         unpacked_latent = self.model.generate_image(
             past_key_values=past_key_values,
@@ -192,6 +212,7 @@ class InterleaveInferencer:
         ropes = gen_context['ropes']
 
         generation_input = self.model.prepare_start_tokens(kv_lens, ropes, self.new_token_ids)
+        generation_input = self._to_device(generation_input)
         unpacked_latent = self.model.generate_text(
             past_key_values=past_key_values,
             max_length=max_length,

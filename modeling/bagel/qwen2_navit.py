@@ -590,8 +590,20 @@ class PackedAttentionMoT(Qwen2Attention):
         if mode == 'und':
             packed_attn_output = self.o_proj(packed_attn_output)
         elif mode == 'gen':
-            packed_attn_output[packed_text_indexes] = self.o_proj(packed_attn_output[packed_text_indexes])
-            packed_attn_output[packed_vae_token_indexes] = self.o_proj_moe_gen(packed_attn_output[packed_vae_token_indexes])
+            if getattr(self, "tp_enabled", False):
+                packed_attn_output_ = packed_attn_output.new_zeros(
+                    (packed_attn_output.shape[0], self.tp_full_hidden_size)
+                )
+                packed_attn_output_[packed_text_indexes] = self.o_proj(packed_attn_output[packed_text_indexes])
+                packed_attn_output_[packed_vae_token_indexes] = self.o_proj_moe_gen(
+                    packed_attn_output[packed_vae_token_indexes]
+                )
+                packed_attn_output = packed_attn_output_
+            else:
+                packed_attn_output[packed_text_indexes] = self.o_proj(packed_attn_output[packed_text_indexes])
+                packed_attn_output[packed_vae_token_indexes] = self.o_proj_moe_gen(
+                    packed_attn_output[packed_vae_token_indexes]
+                )
 
         if update_past_key_values:
             past_key_values.key_cache[self.layer_idx] = merged_key_states
